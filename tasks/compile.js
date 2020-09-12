@@ -3,7 +3,7 @@ const templates = require('./templates');
 
 module.exports = async () => {
   console.log('Compiling modern and legacy script bundles...\n');
-  await bundles();
+  await bundles(false);
 
   console.log('Compiling templates...\n');
   await templates();

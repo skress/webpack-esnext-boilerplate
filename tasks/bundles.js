@@ -4,12 +4,16 @@ const TerserPlugin = require('terser-webpack-plugin');
 const webpack = require('webpack');
 const ManifestPlugin = require('webpack-manifest-plugin');
 const config = require('./config.json');
-const {addAsset, getManifest} = require('./utils/assets');
+const { addAsset, getManifest } = require('./utils/assets');
+const ForkTsCheckerWebpackPlugin = require('fork-ts-checker-webpack-plugin');
+const BundleAnalyzerPlugin = require('webpack-bundle-analyzer').BundleAnalyzerPlugin;
 
-const configurePlugins = () => {
+const configurePlugins = (options) => {
   const plugins = [
+    new ForkTsCheckerWebpackPlugin(),
+
     // Identify each module by a hash, so caching is more predictable.
-    new webpack.HashedModuleIdsPlugin(),
+    new webpack.ids.DeterministicModuleIdsPlugin(),
 
     // Create manifest of the original filenames to their hashed filenames.
     new ManifestPlugin({
@@ -27,14 +31,25 @@ const configurePlugins = () => {
         }, seed);
       },
     }),
-  ];
+  ].concat(options.analyze ? [new BundleAnalyzerPlugin({ analyzerPort: options.legacy ? 8889 : 8888 })] : []);
 
   return plugins;
 };
 
-const configureBabelLoader = (browserlist) => {
+const babelPresetOptions = (browserlist) => ({
+  loose: true,
+  modules: false,
+  // debug: true,
+  corejs: 3,
+  useBuiltIns: 'usage',
+  targets: {
+    browsers: browserlist,
+  },
+});
+
+const configureBabelLoader = (browserlist, plugins) => {
   return {
-    test: /\.js$/,
+    test: /\.jsx?$/,
     use: {
       loader: 'babel-loader',
       options: {
@@ -44,83 +59,110 @@ const configureBabelLoader = (browserlist) => {
           /regenerator-runtime/,
         ],
         presets: [
-          ['@babel/preset-env', {
-            loose: true,
-            modules: false,
-            // debug: true,
-            corejs: 3,
-            useBuiltIns: 'usage',
-            targets: {
-              browsers: browserlist,
-            },
-          }],
+          ['@babel/preset-env', babelPresetOptions(browserlist)],
+          ['@babel/preset-react', babelPresetOptions(browserlist)],
         ],
-        plugins: ['@babel/plugin-syntax-dynamic-import'],
+        plugins: plugins,
       },
     },
   };
 };
 
-const baseConfig = {
-  mode: process.env.NODE_ENV || 'development',
-  cache: {},
-  devtool: '#source-map',
-  optimization: {
-    minimizer: [new TerserPlugin({
-      test: /\.m?js(\?.*)?$/i,
-      sourceMap: true,
-      terserOptions: {
-        safari10: true,
+const createConfig = (options) => {
+  const babelBrowserlist = options.legacy ?
+    [
+      '> 1%',
+      'last 2 versions',
+      'IE 10',
+      'IE 11',
+      'Firefox ESR',
+    ] : [
+      // The last two versions of each browser, excluding versions
+      // that don't support <script type="module">.
+      'last 2 Chrome versions', 'not Chrome < 60',
+      'last 2 Safari versions', 'not Safari < 10.1',
+      'last 2 iOS versions', 'not iOS < 10.3',
+      'last 2 Firefox versions', 'not Firefox < 54',
+      'last 2 Edge versions', 'not Edge < 15',
+    ];
+
+  const babelPlugins = options.legacy ? [
+    '@babel/transform-async-to-generator',
+    '@babel/transform-arrow-functions',
+    '@babel/transform-modules-commonjs',
+    '@babel/plugin-proposal-class-properties'
+  ] : ['@babel/plugin-syntax-dynamic-import'];
+
+  const mode = process.env.NODE_ENV || 'development';
+
+  return ({
+    mode: mode,
+    //cache: {},
+    devtool: 'source-map',
+    optimization: {
+      minimizer: (mode == 'development') ? [] : [new TerserPlugin({
+        test: /\.m?js(\?.*)?$/i,
+        sourceMap: true,
+        terserOptions: {
+          safari10: true,
+        },
+      })],
+    },
+    entry: options.legacy ? {
+      'nomodule': './app/scripts/nomodule.ts',
+    } : {
+        'main': './app/scripts/main.ts',
       },
-    })],
-  },
-};
-
-const modernConfig = Object.assign({}, baseConfig, {
-  entry: {
-    'main': './app/scripts/main.js',
-  },
-  output: {
-    path: path.resolve(__dirname, '..', config.publicDir),
-    publicPath: '/',
-    filename: '[name]-[chunkhash:10].mjs',
-  },
-  plugins: configurePlugins(),
-  module: {
-    rules: [
-      configureBabelLoader([
-        // The last two versions of each browser, excluding versions
-        // that don't support <script type="module">.
-        'last 2 Chrome versions', 'not Chrome < 60',
-        'last 2 Safari versions', 'not Safari < 10.1',
-        'last 2 iOS versions', 'not iOS < 10.3',
-        'last 2 Firefox versions', 'not Firefox < 54',
-        'last 2 Edge versions', 'not Edge < 15',
-      ]),
-    ],
-  },
-});
-
-const legacyConfig = Object.assign({}, baseConfig, {
-  entry: {
-    'nomodule': './app/scripts/nomodule.js',
-  },
-  output: {
-    path: path.resolve(__dirname, '..', config.publicDir),
-    publicPath: '/',
-    filename: '[name]-[chunkhash:10].js',
-  },
-  plugins: configurePlugins(),
-  module: {
-    rules: [
-      configureBabelLoader([
-        '> 1%',
-        'last 2 versions',
-        'Firefox ESR',
-      ]),
-    ],
-  },
-});
+    resolve: {
+      extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
+    },
+    output: {
+      path: path.resolve(__dirname, '..', config.publicDir),
+      publicPath: '/',
+      filename: options.legacy ? '[name]-[chunkhash:10].es5.js' : '[name]-[chunkhash:10].js',
+      environment: options.legacy ? {
+        "arrowFunction": false,
+        "bigIntLiteral": false,
+        "const": false,
+        "destructuring": false,
+        "forOf": false,
+        "dynamicImport": false,
+        "module": false
+      } : {
+        "arrowFunction": true,
+          "bigIntLiteral": true,
+          "const": true,
+          "destructuring": true,
+          "forOf": true,
+          "dynamicImport": true,
+          "module": true
+        }
+    },
+    plugins: configurePlugins(options),
+    module: {
+      rules: [
+        {
+          test: /\.css$/,
+          use: [
+            'style-loader',
+            'css-loader'
+          ]
+        },
+        configureBabelLoader(babelBrowserlist, babelPlugins),
+        {
+          test: /\.tsx?$/,
+          loader: 'ts-loader',
+          exclude: /node_modules/,
+          options: {
+            // disable type checker - we will use it in fork plugin
+            transpileOnly: true,
+            configFile: options.legacy ? 'tsconfig.es5.json' : 'tsconfig.json'
+          }
+        }
+      ],
+    },
+  })
+}
 
 const createCompiler = (config) => {
   const compiler = webpack(config);
@@ -128,17 +170,17 @@ const createCompiler = (config) => {
     return new Promise((resolve, reject) => {
       compiler.run((err, stats) => {
         if (err) return reject(err);
-        console.log(stats.toString({colors: true}) + '\n');
+        console.log(stats.toString({ colors: true }) + '\n');
         resolve();
       });
     });
   };
 };
 
-const compileModernBundle = createCompiler(modernConfig);
-const compileLegacyBundle = createCompiler(legacyConfig);
+const compileModernBundle = (runAnalyzer) => createCompiler(createConfig({ analyze: runAnalyzer, legacy: false }));
+const compileLegacyBundle = (runAnalyzer) => createCompiler(createConfig({ analyze: runAnalyzer, legacy: true }));
 
-module.exports = async () => {
-  await compileModernBundle();
-  await compileLegacyBundle();
+module.exports = async (runAnalyzer) => {
+  await compileModernBundle(runAnalyzer)();
+  await compileLegacyBundle(runAnalyzer)();
 };

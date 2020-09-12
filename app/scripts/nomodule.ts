@@ -2,4 +2,4 @@
 import 'whatwg-fetch';
 
 // Import the main entry file after the polyfills.
-import './main.js';
+import './main.ts';

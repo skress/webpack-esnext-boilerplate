@@ -5,10 +5,15 @@
   <title>Webpack ES.next Boilerplate</title>
 
   <!-- List module entry in the head for faster discovery/preloading -->
-  <script type="module" src="{{ 'main.mjs' | revision }}"></script>
+  <script type="module" src="{{ 'main.js' | revision }}"></script>
 </head>
 <body>
-  {% include 'nomodule-shim.html' %}
-  <script nomodule src="{{ 'nomodule.js' | revision }}"></script>
+  <div data-widget-host="habitat" class="preview">
+    <script type="text/props">
+      { "color": "red" }
+    </script>
+  </div>
+{% include 'nomodule-shim.html' %}
+  <script nomodule src="{{ 'nomodule.es5.js' | revision }}"></script>
 </body>
 </html>
